@@ -145,7 +145,56 @@ However, note that the **driver gap widens** in the full HTTP benchmark compared
 
 **For 10K RPS target:** both drivers are more than sufficient. Choose based on deployment convenience (pure Go vs CGO), not raw speed.
 
-## Run the Benchmarks
+## Real Server Benchmark (`wrk` + Go Fiber)
+
+The benchmarks above use `app.Test()` which runs in-process without real TCP/IP stack. For the most realistic result, we run an actual Fiber server on a port and hit it with [`wrk`](https://github.com/wg/wrk):
+
+- **Server**: Fiber on `:3001` (mattn) and `:3002` (modernc)
+- **DB**: File-backed SQLite with WAL + prepared statements
+- **Load**: `wrk -t10 -c400 -d30s` with randomized user IDs (`/users/{1-10000}`)
+- **Hardware**: Apple M4 (10-core), macOS
+
+### Results
+
+| Metric | mattn/go-sqlite3 | modernc.org/sqlite |
+|---|---|---|
+| **Requests/sec** | **198,135** | 107,974 |
+| **Transfer/sec** | 32.80 MB | 17.87 MB |
+| **Avg Latency** | 5.07 ms | 4.01 ms |
+| **Latency Stdev** | 10.46 ms | 2.99 ms |
+| **Max Latency** | 152.19 ms | 42.69 ms |
+
+### Analysis
+
+- **Throughput**: mattn hampir **2x lebih tinggi** (198K vs 108K RPS). CGO SQLite jauh lebih efisien mengatur I/O scheduling di bawah beban ekstrem.
+- **Consistency**: modernc punya **latensi lebih stabil** (stdev 2.99ms vs 10.46ms, max 42ms vs 152ms). Pure Go scheduler lebih predictable, tapi throughput ceiling lebih rendah.
+- **Pilih mattn kalau**: butuh throughput mentok, infrastructure sudah siap CGO, dan tail latency tinggi masih acceptable.
+- **Pilih modernc kalau**: butuh latensi predictable, deployment simple, dan 100K+ RPS sudah cukup.
+
+### How to Run
+
+```bash
+# Build server
+go build -o benchmark_server ./cmd/benchmark_server
+
+# Run mattn
+./benchmark_server -driver=mattn -port=3001 -db=benchmark.db &
+wrk -t10 -c400 -d30s -s wrk_script.lua http://localhost:3001
+kill %1
+
+# Run modernc
+./benchmark_server -driver=modernc -port=3002 -db=benchmark.db &
+wrk -t10 -c400 -d30s -s wrk_script.lua http://localhost:3002
+kill %1
+```
+
+Or use the automated script:
+
+```bash
+./benchmark_wrk.sh
+```
+
+## Run the Go Benchmarks
 
 ```bash
 # Raw DB only
@@ -154,7 +203,7 @@ go test -bench=. -run=^$ -benchtime=1s
 # Concurrent DB
 go test -bench=BenchmarkConcurrent -run=^$ -benchtime=2s
 
-# HTTP Fiber + DB
+# HTTP Fiber in-process
 go test -bench=BenchmarkHTTPGet -run=^$ -benchtime=2s
 ```
 
