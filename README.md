@@ -121,11 +121,41 @@ Pick **`modernc.org/sqlite`**. Sleep better with pure Go deployments. If you eve
 
 ---
 
-## Run the Concurrent Benchmark
+## HTTP Benchmark (Go Fiber + Full Request Cycle)
+
+The most realistic benchmark: full HTTP GET request through **Go Fiber**, including routing, DB query (`SELECT ... WHERE id = ?`), and JSON response. This reflects actual production server behavior.
+
+```
+Request → Fiber routing → Auth middleware (optional) → SQLite query → JSON marshal → Response
+```
+
+### Results (10-core Apple M4, WAL mode, `b.RunParallel`)
+
+| Scenario | mattn/go-sqlite3 | modernc.org/sqlite | Diff |
+|---|---|---|---|
+| **GET /users/:id (memory)** | ~105K RPS (9,558 ns/op) | ~84K RPS (11,902 ns/op) | mattn ~25% faster |
+| **GET /users/:id (file + WAL)** | **~225K RPS** (4,454 ns/op) | ~124K RPS (8,063 ns/op) | mattn ~80% faster |
+| **GET + Auth middleware (file)** | ~214K RPS (4,679 ns/op) | ~118K RPS (8,476 ns/op) | mattn ~80% faster |
+
+### What This Tells Us
+
+Even with **full HTTP stack overhead** (Fiber routing, request parsing, JSON marshaling, response writing), both drivers easily exceed **100K RPS** on a simple GET endpoint. This confirms SQLite is not the bottleneck for read-heavy APIs at 10K RPS — your limits will be network, payload size, or downstream services first.
+
+However, note that the **driver gap widens** in the full HTTP benchmark compared to raw DB-only tests. This is because the faster driver (mattn) completes queries sooner, allowing Fiber to free up goroutines and handle more requests overall. At extreme concurrency, small per-query differences compound.
+
+**For 10K RPS target:** both drivers are more than sufficient. Choose based on deployment convenience (pure Go vs CGO), not raw speed.
+
+## Run the Benchmarks
 
 ```bash
-cd /Volumes/data/Project/go-db-benchmark
+# Raw DB only
+go test -bench=. -run=^$ -benchtime=1s
+
+# Concurrent DB
 go test -bench=BenchmarkConcurrent -run=^$ -benchtime=2s
+
+# HTTP Fiber + DB
+go test -bench=BenchmarkHTTPGet -run=^$ -benchtime=2s
 ```
 
 ## License
