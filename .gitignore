@@ -1,0 +1,14 @@
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# Binary
+benchmark_server
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
